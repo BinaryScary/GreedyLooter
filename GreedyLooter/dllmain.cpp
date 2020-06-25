@@ -175,8 +175,6 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
 		setRtlSEDebug();
 		pssMiniDumpLoot();
     case DLL_THREAD_ATTACH:
-		setRtlSEDebug();
-		pssMiniDumpLoot();
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
         break;

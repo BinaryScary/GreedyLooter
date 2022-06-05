@@ -300,6 +300,12 @@ BOOL IsElevated() {
 	return fRet;
 }
 
+// dummy export function for rundll32
+#define EXPORT extern "C" __declspec(dllexport)
+EXPORT void CALLBACK dumbExport(HWND hwnd, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
+{
+}
+
 // Change build type .DLL
 // Properties->General->Configuration Type:Dynamic Library(.dll)
 // SubSystem flag has no effect on DLL

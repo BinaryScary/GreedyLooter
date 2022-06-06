@@ -112,7 +112,7 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 			// check if allocation is bigger then array and resize
 			if ((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2 > buff->size) {
 				int oldSize = buff->size;
-				int newSize = ((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2) * 1.5;  // 1.5 multiplicative factor
+				int newSize = round(((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2) * 1.5);  // 1.5 multiplicative factor
 
 				// realloc and update size
 				buff->buffer = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,buff->buffer, newSize);
@@ -122,9 +122,8 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 				}
 
 				// initalize new mem to '0'
-				for (int i = oldSize; i < newSize; i++) {
-					((char*) buff->buffer)[i] = '0';
-				}
+				LPVOID zeroDestination = (LPVOID)((DWORD_PTR)buff->buffer + oldSize);
+				memset(zeroDestination, '0', (size_t)newSize - (size_t)oldSize);
 			}
 
 			// get offset for write
@@ -191,9 +190,7 @@ BOOL pssMiniDumpLoot() {
 	};
 
 	// initialize buffer with '0' chars, since minidump doesn't write unreadable process memory
-	for (int i = 0; i < buff->size; i++) {
-		((char*) buff->buffer)[i] = '0';
-	}
+	memset(buff->buffer, '0', buff->size);
 
 	// callback info
 	MINIDUMP_CALLBACK_INFORMATION CallbackInfo;

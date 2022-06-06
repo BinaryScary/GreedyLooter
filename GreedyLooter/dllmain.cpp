@@ -305,9 +305,9 @@ DWORD dumpLootThreadWrapper(LPVOID lpParameter) {
 
 // global thead handle for dll execution
 HANDLE tHandle;
-// dummy export function for rundll32
-#define EXPORT extern "C" __declspec(dllexport)
-EXPORT void CALLBACK testDLL(HWND hwnd, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
+
+// export function for rundll32
+extern "C" __declspec (dllexport) void testDLL()
 {
 	WaitForSingleObject(tHandle, INFINITE);
 }

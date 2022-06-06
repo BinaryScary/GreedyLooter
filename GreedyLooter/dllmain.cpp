@@ -207,6 +207,10 @@ BOOL pssMiniDumpLoot() {
 	DWORD bytesWritten = 0;
 	WriteFile(hFile, buff->buffer, buff->size, &bytesWritten, NULL);
 
+	// free buffer and delete smartarray
+	HeapFree(GetProcessHeap(), HEAP_ZERO_MEMORY, buff->buffer);
+	delete buff;
+
 	CloseHandle(hFile);
 	CloseHandle(hProcess);
 

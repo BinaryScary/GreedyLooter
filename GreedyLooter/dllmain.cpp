@@ -110,10 +110,9 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 			buff = (SmartArray*)CallbackParam;
 
 			// check if allocation is bigger then array and resize
-			if (CallbackInput->Io.Offset * 2 + CallbackInput->Io.BufferBytes >= buff->size) {
-				// CallbackInput->Io.Offset * 2 + CallbackInput->Io.BufferBytes will never be smaller then buff
+			if ((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2 > buff->size) {
 				int oldSize = buff->size;
-				int newSize = (CallbackInput->Io.Offset * 4) + CallbackInput->Io.BufferBytes; // double size of offset + buffer
+				int newSize = ((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2) * 1.5;  // 1.5 multiplicative factor
 
 				// create new buffer
 				PVOID tempBuff = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newSize);
@@ -190,8 +189,8 @@ BOOL pssMiniDumpLoot() {
 
 	// initialize callback parameter
 	SmartArray* buff = new SmartArray{
-		HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 1024 * 1024 * 75),
-		1024 * 1024 * 75
+		HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 125000 * 1024), // allocate 125000 kb
+		125000 * 1024
 	};
 
 	// initialize buffer with '0' chars, since minidump doesn't write unreadable process memory

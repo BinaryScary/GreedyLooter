@@ -3,6 +3,6 @@
 
 ## Features
 - Process Snapshot -> Minidump 
-- Minidump encoded during dump callback
+- Minidump encoded during dump callback to avoid detection
 - undocumented ntdll functions
 - Windows version checking for api calls
